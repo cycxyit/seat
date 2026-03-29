@@ -1,0 +1,37 @@
+{
+  "name": "cinema-booking-backend",
+  "version": "1.0.0",
+  "description": "Cinema seat booking backend with Express and Google Sheets integration",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "init:db": "node scripts/initDb.js",
+    "seed:demo": "node scripts/seedDemo.js",
+    "test:api": "node scripts/test-api.js"
+  },
+  "keywords": [
+    "cinema",
+    "booking",
+    "seats",
+    "express",
+    "google-sheets"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "google-auth-library": "^9.2.0",
+    "googleapis": "^118.0.0",
+    "multer": "^2.1.1",
+    "sqlite3": "^5.1.6",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

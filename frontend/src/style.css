@@ -1,0 +1,252 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* ──────────────── CSS Variables ──────────────── */
+:root {
+  --primary: #FFA07A;
+  --primary-dark: #e8855e;
+  --primary-light: #FFD0B9;
+  --primary-ultra-light: #FFF4EF;
+  --primary-glow: rgba(255, 160, 122, 0.25);
+
+  --bg: #F8F9FB;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F3F4F7;
+  --bg-hover: #FFF4EF;
+
+  --text-primary: #1A202C;
+  --text-secondary: #4A5568;
+  --text-muted: #718096;
+  --text-on-primary: #FFFFFF;
+
+  --border: #E2E8F0;
+  --border-focus: #FFA07A;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.09), 0 2px 6px rgba(0,0,0,0.05);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.11), 0 4px 12px rgba(0,0,0,0.07);
+  --shadow-primary: 0 4px 20px rgba(255, 160, 122, 0.35);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+
+  --transition: 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ──────────────── Reset ──────────────── */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text-primary);
+  min-height: 100vh;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ──────────────── Buttons ──────────────── */
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 10px 20px;
+  transition: all var(--transition);
+  letter-spacing: 0.01em;
+  outline: none;
+}
+
+button:hover { transform: translateY(-1px); }
+button:active { transform: translateY(0); }
+button:focus-visible { box-shadow: 0 0 0 3px var(--primary-glow); }
+
+button.primary {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  color: var(--text-on-primary);
+  box-shadow: var(--shadow-primary);
+}
+button.primary:hover {
+  background: linear-gradient(135deg, #ff9060 0%, #d9734c 100%);
+  box-shadow: 0 6px 24px rgba(255, 160, 122, 0.45);
+}
+
+button.secondary {
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  border: 1.5px solid var(--border);
+}
+button.secondary:hover {
+  background: var(--bg-hover);
+  border-color: var(--primary-light);
+  color: var(--primary-dark);
+}
+
+button.danger {
+  background: #FED7D7;
+  color: #C53030;
+  border: 1.5px solid #FCA5A5;
+}
+button.danger:hover {
+  background: #FC8181;
+  color: white;
+  border-color: #FC8181;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* ──────────────── Inputs ──────────────── */
+input, select, textarea {
+  padding: 11px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  transition: all var(--transition);
+  width: 100%;
+  outline: none;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+input::placeholder { color: var(--text-muted); }
+
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23718096'%3E%3Cpath d='M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+/* ──────────────── Alert / Toast ──────────────── */
+.alert {
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.alert.success {
+  background: #F0FFF4;
+  color: #276749;
+  border: 1.5px solid #9AE6B4;
+}
+
+.alert.error {
+  background: #FFF5F5;
+  color: #C53030;
+  border: 1.5px solid #FC8181;
+}
+
+.alert.warning {
+  background: #FFFBEB;
+  color: #92400E;
+  border: 1.5px solid #FCD34D;
+}
+
+.alert.info {
+  background: #EBF8FF;
+  color: #2B6CB0;
+  border: 1.5px solid #90CDF4;
+}
+
+/* ──────────────── Card ──────────────── */
+.card {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  border: 1.5px solid var(--border);
+  box-shadow: var(--shadow-md);
+  padding: 32px;
+}
+
+/* ──────────────── Loading spinner ──────────────── */
+.loading-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 14px;
+  padding: 40px;
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ──────────────── Animations ──────────────── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+.fadeInUp  { animation: fadeInUp 0.38s ease forwards; }
+.fadeIn    { animation: fadeIn 0.3s ease forwards; }
+
+/* ──────────────── Badge ──────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.badge-primary  { background: var(--primary-ultra-light); color: var(--primary-dark); border: 1px solid var(--primary-light); }
+.badge-time     { background: #FFFBEB; color: #92400E; border: 1px solid #FCD34D; }
+.badge-teacher  { background: #EBF8FF; color: #2B6CB0; border: 1px solid #90CDF4; }
+.badge-dept     { background: #F0FFF4; color: #276749; border: 1px solid #9AE6B4; }
+.badge-success  { background: #F0FFF4; color: #276749; }
