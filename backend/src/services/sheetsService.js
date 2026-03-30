@@ -75,18 +75,18 @@ function getLogicalPosition(pRowIndex, pColIndex, maxCols, aisleAfter) {
 }
 
 // ─── 1. 获取座位占用状况 ──────────────────────────────────────
-export async function getSeatsFromSheet(tabName, maxRow, maxCol, aisleAfter = 5) {
-  if (!sheetsClient) return [];
+export async function getSeatMapFromSheet(tabName, maxRow, maxCol, aisleAfter = 5) {
+  if (!sheetsClient) return {};
   try {
     const spreadsheetId = getSpreadsheetId();
-    if (!spreadsheetId) return [];
+    if (!spreadsheetId) return {};
 
     const endColLetter = colToLetter(maxCol + 2); // safety buffer
     const range = `'${tabName}'!A1:${endColLetter}${maxRow * 2 + 5}`;
 
     const response = await sheetsClient.spreadsheets.values.get({ spreadsheetId, range });
     const rows = response.data.values || [];
-    const occupiedSeats = [];
+    const seatMap = {};
 
     for (let rIndex = 0; rIndex < rows.length; rIndex++) {
       const rowData = rows[rIndex];
@@ -95,15 +95,42 @@ export async function getSeatsFromSheet(tabName, maxRow, maxCol, aisleAfter = 5)
         if (cellValue !== null && cellValue !== undefined && String(cellValue).trim() !== '') {
           const logical = getLogicalPosition(rIndex, cIndex, maxCol, aisleAfter);
           if (logical) {
-            occupiedSeats.push(`${logical.r}-${logical.c}`);
+            seatMap[`${logical.r}-${logical.c}`] = String(cellValue).trim();
           }
         }
       }
     }
-    return occupiedSeats;
+    return seatMap;
   } catch (err) {
-    if (err.message && err.message.includes('Unable to parse range')) return [];
-    console.error(`❌ Error fetching seats for [${tabName}]:`, err.message);
+    if (err.message && err.message.includes('Unable to parse range')) return {};
+    console.error(`❌ Error fetching seat map for [${tabName}]:`, err.message);
+    throw err;
+  }
+}
+
+export async function getSeatsFromSheet(tabName, maxRow, maxCol, aisleAfter = 5) {
+  const seatMap = await getSeatMapFromSheet(tabName, maxRow, maxCol, aisleAfter);
+  return Object.keys(seatMap);
+}
+
+export async function getSeatValueFromSheet(tabName, row, col, aisleAfter = 5) {
+  if (!sheetsClient) return '';
+  const spreadsheetId = getSpreadsheetId();
+  if (!spreadsheetId) return '';
+
+  const { pRow, pCol } = getPhysicalPosition(row, col, aisleAfter);
+  const cellRef = `${colToLetter(pCol)}${pRow}`;
+  const range = `'${tabName}'!${cellRef}`;
+
+  try {
+    const response = await sheetsClient.spreadsheets.values.get({ spreadsheetId, range });
+    const value = response.data.values?.[0]?.[0];
+    return value ? String(value).trim() : '';
+  } catch (err) {
+    if (err.message && (err.message.includes('Unable to parse range') || err.message.includes('is not valid'))) {
+      return '';
+    }
+    console.error(`❌ Error fetching seat value for [${tabName} ${cellRef}]:`, err.message);
     throw err;
   }
 }
@@ -133,51 +160,74 @@ export async function updateSeatInSheet(tabName, row, col, infoString, aisleAfte
 }
 
 // ─── 3. 追加总名单记录（支持多科目）────────────────────────────
-// bookingData = { session_id, user_code, name, phone, receipt_url, timestamp,
-//                 bookings: [{ subject, teacher, theater_name, seatFormatted }, ...] }
 export async function appendBookingRecord(bookingData) {
   if (!sheetsClient) return;
   try {
     const spreadsheetId = getSpreadsheetId();
     const recordsTab = process.env.GOOGLE_SHEETS_RECORDS_TAB || '总名单';
+    const { session_id, user_code, name, phone, receipt_url, timestamp, bookings = [] } = bookingData;
+    
+    const maxSubCols = parseInt(process.env.MAX_SUBJECTS || '3', 10);
 
-    // Ensure the Records sheet + header exists
-    await ensureRecordsTabAndHeader(spreadsheetId, recordsTab, bookingData.bookings?.length || 1);
+    // 确保表头存在且布局一致
+    await ensureRecordsTabAndHeader(spreadsheetId, recordsTab, maxSubCols);
 
-    const { user_code, name, phone, receipt_url, timestamp, bookings = [] } = bookingData;
+    // 构造行数据 (严格按照用户给定的 A-R 规范):
+    // A (0): 提交时间
+    // B (1): 工号 (user_code)
+    // C (2): 姓名 (name)
+    // D (3): 电话 (phone)
+    // E (4): 补几科 (bookings.length)
+    // F-I (5-8): 科目1 (科目, 老师, 科室, 座位)
+    // J-M (9-12): 科目2
+    // N-Q (13-16): 科目3
+    // R (17): 凭证链接
+    const row = new Array(18).fill(''); 
+    row[0] = timestamp || new Date().toISOString();
+    row[1] = user_code || '';
+    row[2] = name || '';
+    row[3] = phone || '';
+    row[4] = bookings.length;
+    
+    // 填充科目信息 (F-Q)
+    for (let i = 0; i < maxSubCols; i++) {
+        const startIdx = 5 + (i * 4); // F(5), J(9), N(13)
+        if (bookings[i] && startIdx < 17) {
+            row[startIdx] = bookings[i].subject || '';
+            row[startIdx + 1] = bookings[i].teacher || '';
+            row[startIdx + 2] = bookings[i].theater_name || '';
+            row[startIdx + 3] = bookings[i].seatFormatted || '';
+        }
+    }
+    
+    row[17] = receipt_url || '';
 
-    // Build row: Timestamp | 工号 | 姓名 | 电话 | 补几科 | [科目 | 老师 | 科室 | 座位]×N | 凭证链接
-    const row = [
-      timestamp || new Date().toISOString(),
-      user_code || '',
-      name || '',
-      phone || '',
-      bookings.length,
-    ];
-
-    for (const b of bookings) {
-      row.push(b.subject || '');
-      row.push(b.teacher || '');
-      row.push(b.theater_name || '');
-      row.push(b.seatFormatted || '');
+    // --- 查找并更新现有行 (以 工号 UserCode 为唯一基准进行合并) ---
+    const fullDataRes = await sheetsClient.spreadsheets.values.get({ spreadsheetId, range: `'${recordsTab}'!B:B` });
+    const bColValues = fullDataRes.data.values || [];
+    let existingRowIndex = -1;
+    
+    if (user_code) {
+      existingRowIndex = bColValues.findIndex(val => String(val[0]).trim() === String(user_code).trim());
     }
 
-    row.push(receipt_url || '');
-
-    // Append the wider range
-    const endCol = colToLetter(5 + bookings.length * 4 + 1);
-    const range = `'${recordsTab}'!A:${endCol}`;
-
-    await sheetsClient.spreadsheets.values.append({
-      spreadsheetId,
-      range,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [row] }
-    });
-
-    console.log(`✅ Master record appended to '${recordsTab}'`);
+    if (existingRowIndex !== -1) {
+      // 覆盖更新
+      const range = `'${recordsTab}'!A${existingRowIndex + 1}:R${existingRowIndex + 1}`;
+      await sheetsClient.spreadsheets.values.update({
+        spreadsheetId, range, valueInputOption: 'USER_ENTERED', requestBody: { values: [row] }
+      });
+      console.log(`✅ Master record updated at row ${existingRowIndex + 1} (User: ${user_code})`);
+    } else {
+      // 追加新行
+      const range = `'${recordsTab}'!A:R`;
+      await sheetsClient.spreadsheets.values.append({
+        spreadsheetId, range, valueInputOption: 'USER_ENTERED', requestBody: { values: [row] }
+      });
+      console.log(`✅ Master record appended (User: ${user_code})`);
+    }
   } catch (err) {
-    console.error('❌ Error appending master record:', err.message);
+    console.error('❌ Error in master record sync:', err.message);
   }
 }
 
@@ -195,25 +245,25 @@ async function ensureRecordsTabAndHeader(spreadsheetId, tabName, subjectCount) {
     }
 
     // Build header row
+    // A:提交时间, B:工号, C:姓名, D:电话, E:补几科
     const header = ['提交时间', '工号', '姓名', '电话', '补几科'];
     for (let i = 1; i <= subjectCount; i++) {
-      header.push(`科目${i}`, `老师${i}`, `科室${i}`, `座位${i}`);
+        header.push(`科目${i}`, `老师${i}`, `科室${i}`, `座位${i}`);
     }
-    header.push('凭证链接');
+    
+    // 确保凭证链接在 R 列 (Index 17)
+    while (header.length < 17) {
+        header.push('');
+    }
+    header[17] = '凭证链接';
 
-    // Write header to row 1 only if it's empty
-    const checkRange = `'${tabName}'!A1`;
-    const checkRes = await sheetsClient.spreadsheets.values.get({ spreadsheetId, range: checkRange });
-    const existing = checkRes.data.values?.[0]?.[0];
-
-    if (!existing) {
-      await sheetsClient.spreadsheets.values.update({
+    // 强力校准：每次同步都检查一次表头，如果不匹配则重写（或至少确保第一次写入是正确的）
+    await sheetsClient.spreadsheets.values.update({
         spreadsheetId,
-        range: `'${tabName}'!A1`,
+        range: `'${tabName}'!A1:R1`,
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [header] }
-      });
-    }
+    });
   } catch (err) {
     console.warn('⚠️ Could not ensure Records tab/header:', err.message);
   }

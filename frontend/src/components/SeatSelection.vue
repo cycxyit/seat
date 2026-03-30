@@ -40,7 +40,7 @@
     <!-- SSE update toast -->
     <Transition name="toast">
       <div v-if="showUpdateToast" class="update-toast">
-        🔄 有新座位被预订，座位图已更新
+        {{ toastMsg }}
       </div>
     </Transition>
 
@@ -133,6 +133,7 @@ const selectedSeat = ref(null)
 const localBookedSeats = ref([...props.bookedSeats])
 const isLive = ref(false)
 const showUpdateToast = ref(false)
+const toastMsg = ref('')
 let eventSource = null
 let toastTimer = null
 
@@ -154,18 +155,21 @@ function connectSSE() {
       if (data.type === 'seat_booked' && data.seat) {
         if (!localBookedSeats.value.includes(data.seat)) {
           localBookedSeats.value = [...localBookedSeats.value, data.seat]
-          // If the seat was selected, deselect it
-          if (selectedSeat.value === data.seat) {
-            selectedSeat.value = null
-          }
-          showToast()
+          if (selectedSeat.value === data.seat) selectedSeat.value = null
+          showToast('🔄 有新座位被预订，座位图已更新')
+        }
+      } else if (data.type === 'seat_cancelled' && data.seat) {
+        if (localBookedSeats.value.includes(data.seat)) {
+          localBookedSeats.value = localBookedSeats.value.filter(s => s !== data.seat)
+          showToast('🔄 有座位被释放，现在可以选择了')
         }
       }
     } catch (_) {}
   }
 }
 
-function showToast() {
+function showToast(msg) {
+  toastMsg.value = msg
   showUpdateToast.value = true
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { showUpdateToast.value = false }, 4000)

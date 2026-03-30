@@ -1,6 +1,5 @@
 import express from 'express';
 import { allAsync, getAsync } from '../db/init.js';
-import { getSeatsFromSheet } from '../services/sheetsService.js';
 import { addClient, removeClient } from '../sseManager.js';
 
 const router = express.Router();
@@ -42,12 +41,20 @@ router.get('/:id/seats', async (req, res) => {
     );
     if (!theater) return res.status(404).json({ error: 'Theater not found' });
 
-    let bookedSeats = [];
-    try {
-      bookedSeats = await getSeatsFromSheet(theater.tab_name || theater.name, theater.rows, theater.cols, theater.aisle_after);
-    } catch (e) {
-      console.warn(`⚠️ Using empty grid for ${theater.name}:`, e.message);
+    const bookings = await allAsync(
+      'SELECT seats FROM bookings WHERE theater_id = ? AND status = ?',
+      [theater.id, 'confirmed']
+    );
+
+    const bookedSet = new Set();
+    for (const row of bookings) {
+      try {
+        const seats = JSON.parse(row.seats || '[]');
+        seats.forEach((seat) => bookedSet.add(seat));
+      } catch (_) {}
     }
+
+    const bookedSeats = Array.from(bookedSet);
 
     res.json({
       success: true,

@@ -12,9 +12,12 @@
             <label>Admin Key</label>
             <input v-model="inputKey" type="password" placeholder="请输入管理员密钥" required autofocus />
           </div>
-          <button type="submit" class="primary btn-full" :disabled="!inputKey.trim()">
-            登录管理后台
+          <button type="submit" class="primary btn-full" :disabled="!inputKey.trim() || loading">
+            {{ loading ? '验证中...' : '登录管理后台' }}
           </button>
+          <div v-if="loginMsg" class="alert" :class="loginMsgType" style="margin-top: 12px; text-align: center;">
+            {{ loginMsg }}
+          </div>
         </form>
       </div>
     </div>
@@ -27,6 +30,24 @@
           <p class="card-desc" style="margin:0">科室座位配置 · 系统设置</p>
         </div>
         <button class="secondary" @click="logout">退出登录</button>
+      </div>
+
+      <div class="admin-card sync-card" style="margin-bottom: 24px;">
+        <div class="card-section-title">🔄 数据库同步 (Google Sheets → 本地)</div>
+        <div class="sync-panel-content">
+          <div class="sync-status">
+            <div class="sync-info-item">上次同步：<strong>{{ syncStatus.lastSyncAt || '未执行' }}</strong></div>
+            <div class="sync-info-item">
+              状态：<strong :class="syncStatus.lastSyncResult">{{ syncStatus.lastSyncResult === 'success' ? '已成功' : (syncStatus.lastSyncResult === 'failure' ? '已失败' : '从未执行') }}</strong>
+            </div>
+            <div class="sync-info-item">数据：新增 <strong>{{ syncStatus.createdRecords }}</strong> 条，失效 <strong>{{ syncStatus.cancelledRecords }}</strong> 条</div>
+            <div v-if="syncStatus.message" class="sync-message">{{ syncStatus.message }}</div>
+          </div>
+          <button class="primary" :disabled="syncing" @click="manualSync" style="margin-top: 16px;">
+            <span v-if="syncing" class="btn-loading"><span class="spinner-small"></span> 同步中...</span>
+            <span v-else>立即从 Google Sheets 同步最新座位图</span>
+          </button>
+        </div>
       </div>
 
       <div class="dash-grid">
@@ -166,6 +187,15 @@ const inputKey  = ref('')
 const loading   = ref(false)
 const departments = ref([])
 
+const syncStatus = ref({
+  lastSyncAt: null,
+  lastSyncResult: 'never',
+  message: '',
+  createdRecords: 0,
+  cancelledRecords: 0
+})
+const syncing = ref(false)
+
 // Config
 const configForm = ref({ site_name: '', logo_url: '', footer_text: '', max_subjects: '3' })
 const savingConfig = ref(false)
@@ -178,6 +208,10 @@ const createMsg  = ref('')
 const createMsgType = ref('success')
 const newDept = ref({ name: '', rows: 5, cols: 6, aisle_after: 3, door_row: 0, class_time: '', subject: '', teacher: '' })
 
+// Login msg
+const loginMsg = ref('')
+const loginMsgType = ref('error')
+
 onMounted(() => {
   const saved = sessionStorage.getItem('adminKey')
   if (saved) {
@@ -187,13 +221,21 @@ onMounted(() => {
   }
 })
 
-function login() {
+async function login() {
   const key = inputKey.value.trim()
   if (!key) return
-  sessionStorage.setItem('adminKey', key)
-  adminKey.value = key
+  
+  loginMsg.value = ''
   setAdminKey(key)
-  loadAll()
+  
+  const success = await loadAll(true)
+  if (success) {
+    sessionStorage.setItem('adminKey', key)
+    adminKey.value = key
+  } else {
+    loginMsg.value = '❌ 管理员密钥错误，请检查后重试'
+    setAdminKey('') // 清除错误的 key
+  }
 }
 
 function logout() {
@@ -204,7 +246,7 @@ function logout() {
   departments.value = []
 }
 
-async function loadAll() {
+async function loadAll(isLogin = false) {
   loading.value = true
   try {
     const [deptRes, cfgRes] = await Promise.all([
@@ -215,12 +257,49 @@ async function loadAll() {
     if (cfgRes.data.success) {
       configForm.value = { ...configForm.value, ...cfgRes.data.data }
     }
+
+    await loadSyncStatus()
+    return true
   } catch (err) {
     console.error('Load error:', err)
+    if (isLogin) return false
+    
+    // 如果是自动加载且遇到 403，说明 session 中的 key 失效了
+    if (err.response?.status === 403) {
+      logout()
+    }
+    return false
   } finally {
     loading.value = false
   }
 }
+
+async function loadSyncStatus() {
+  try {
+    const res = await adminAPI.getSyncStatus()
+    if (res.data.success) {
+      syncStatus.value = res.data.data
+    }
+  } catch (err) {
+    console.warn('获取同步状态失败', err)
+  }
+}
+
+async function manualSync() {
+  syncing.value = true
+  try {
+    const res = await adminAPI.triggerSync()
+    if (res.data.success) {
+      syncStatus.value = res.data.data
+    }
+  } catch (err) {
+    syncStatus.value.message = '手动同步出错，请查看控制台' + (err.message ? `：${err.message}` : '')
+    console.warn(err)
+  } finally {
+    syncing.value = false
+  }
+}
+
 
 async function saveConfig() {
   savingConfig.value = true
@@ -442,4 +521,28 @@ textarea { resize: vertical; min-height: 60px; }
 }
 
 .btn-sm { padding: 7px 14px; font-size: 12px; flex-shrink: 0; }
+
+.sync-panel {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sync-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, max-content));
+  gap: 8px;
+  align-items: center;
+}
+
+.sync-status strong.success { color: #38a169; }
+.sync-status strong.failure { color: #e53e3e; }
+.sync-status strong.never { color: #718096; }
 </style>

@@ -1,8 +1,9 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getAsync, runAsync, allAsync } from '../db/init.js';
-import { getSeatsFromSheet, updateSeatInSheet, appendBookingRecord, initializeSheets } from '../services/sheetsService.js';
+import { getSeatMapFromSheet, updateSeatInSheet, appendBookingRecord, initializeSheets } from '../services/sheetsService.js';
 import { broadcastToTheater } from '../sseManager.js';
+import { validateUserCode } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -20,9 +21,36 @@ function formatSeatId(seatId) {
   return seatId;
 }
 
+async function getConfirmedSeatsFromDb(theater_id) {
+  const rows = await allAsync('SELECT seats FROM bookings WHERE theater_id = ? AND status = ?', [theater_id, 'confirmed']);
+  const seatSet = new Set();
+  for (const row of rows) {
+    try {
+      const seats = JSON.parse(row.seats || '[]');
+      seats.forEach((seat) => seatSet.add(seat));
+    } catch (_) {
+      // skip malformed row
+    }
+  }
+  return Array.from(seatSet);
+}
+
+// ─── GET /bookings/check-user/:user_code ───────────────────
+router.get('/check-user/:user_code', async (req, res) => {
+  try {
+    const { user_code } = req.params;
+    const booking = await getAsync(
+      'SELECT id FROM bookings WHERE user_code = ? AND status = ? LIMIT 1',
+      [user_code, 'confirmed']
+    );
+    res.json({ success: true, exists: !!booking });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to check user code', message: err.message });
+  }
+});
+
 // ─── POST /bookings/multi — 多科目批量预订 ──────────────────
-// Body: { bookings: [{theater_id, seat},...], name, phone, receipt_url, session_id }
-router.post('/multi', async (req, res) => {
+router.post('/multi', validateUserCode, async (req, res) => {
   try {
     const { bookings, name, phone, receipt_url, session_id } = req.body;
     const userCode = req.userCode;
@@ -41,11 +69,6 @@ router.post('/multi', async (req, res) => {
     // Process each subject booking independently
     for (const booking of bookings) {
       const { theater_id, seat } = booking;
-      if (!theater_id || !seat) {
-        failedBookings.push({ theater_id, seat, reason: '参数无效' });
-        continue;
-      }
-
       try {
         const [rowRaw, colRaw] = String(seat).split('-');
         const row = parseInt(rowRaw, 10);
@@ -57,15 +80,58 @@ router.post('/multi', async (req, res) => {
         );
 
         if (!theater) {
-          failedBookings.push({ theater_id, seat, reason: '科室不存在' });
+          failedBookings.push({ theater_id, seat, subject: '未知科目', reason: '科室不存在' });
           continue;
         }
 
         const tabName = theater.tab_name || theater.name;
-        const occupiedSeats = await getSeatsFromSheet(tabName, theater.rows, theater.cols, theater.aisle_after);
 
-        if (occupiedSeats.includes(seat)) {
-          failedBookings.push({ theater_id, seat, reason: `${formatSeatId(seat)} 已被抢先预订，请重选` });
+        // --- 【核心修复】：解决死锁问题 ---
+        // 1. 检查数据库中是否已经存在该用户对该座位的“已确认”记录
+        const existingBooking = await getAsync(
+          'SELECT id FROM bookings WHERE theater_id = ? AND user_code = ? AND seats LIKE ? AND status = ?',
+          [theater_id, userCode, `%${seat}%`, 'confirmed']
+        );
+
+        if (existingBooking) {
+          // 如果已经是自己占领的，直接视为成功，以数据库为唯一准则，避免频繁请求 Google Sheet
+          confirmedBookings.push({
+            booking_id: existingBooking.id,
+            theater_id,
+            theater_name: theater.name,
+            subject: theater.subject,
+            teacher: theater.teacher,
+            class_time: theater.class_time,
+            seat,
+            seat_formatted: formatSeatId(seat)
+          });
+          continue;
+        }
+
+        // 2. 如果不是自己的记录，再检查是否被别人占用
+        const currentBooked = await getConfirmedSeatsFromDb(theater_id);
+        const occupiedSet = new Set(currentBooked);
+
+        if (occupiedSet.has(seat)) {
+          failedBookings.push({ 
+            theater_id, 
+            seat, 
+            subject: theater.subject || '未命名科目',
+            reason: `Oops! 你手慢了 你选的${theater.subject || '该'}科目座位被占了，请重选` 
+          });
+          continue;
+        }
+
+        // 3. 只有全新的预订才写入 Google Sheet 和数据库
+        try {
+          await updateSeatInSheet(tabName, row, col, `${userCode} ${name}`, theater.aisle_after);
+        } catch (se) {
+          failedBookings.push({ 
+            theater_id, 
+            seat, 
+            subject: theater.subject || '未命名科目',
+            reason: `${formatSeatId(seat)} Google Sheet 更新失败，请稍后重试` 
+          });
           continue;
         }
 
@@ -76,14 +142,6 @@ router.post('/multi', async (req, res) => {
           [bookingId, theater_id, userCode, name, phone, receipt_url || '', JSON.stringify([seat]), 'confirmed', sessionId]
         );
 
-        // Update classroom tab
-        try {
-          await updateSeatInSheet(tabName, row, col, `${userCode} ${name}`, theater.aisle_after);
-        } catch (se) {
-          console.warn(`⚠️ Sheet update failed for booking ${bookingId}:`, se.message);
-        }
-
-        // Broadcast SSE to all viewers of this theater
         broadcastToTheater(theater_id, {
           type: 'seat_booked',
           theater_id,
@@ -107,9 +165,27 @@ router.post('/multi', async (req, res) => {
       }
     }
 
-    // Append one master record row with ALL confirmed subjects
+    // Append one master record row with ALL confirmed subjects for this session
     if (confirmedBookings.length > 0) {
       try {
+        // Fetch ALL confirmed bookings for this USER (including previous successful rounds)
+        const sessionBookings = await allAsync(
+          `SELECT b.theater_id, t.subject, t.teacher, t.name as theater_name, b.seats
+           FROM bookings b JOIN theaters t ON b.theater_id = t.id
+           WHERE b.user_code = ? AND b.status = ?`,
+          [userCode, 'confirmed']
+        );
+
+        const allConfirmedInSession = sessionBookings.map(sb => {
+          const seats = JSON.parse(sb.seats || '[]');
+          return {
+            subject: sb.subject,
+            teacher: sb.teacher,
+            theater_name: sb.theater_name,
+            seatFormatted: formatSeatId(seats[0])
+          };
+        });
+
         await appendBookingRecord({
           session_id: sessionId,
           user_code: userCode,
@@ -117,12 +193,7 @@ router.post('/multi', async (req, res) => {
           phone,
           receipt_url,
           timestamp: new Date().toISOString(),
-          bookings: confirmedBookings.map(b => ({
-            subject: b.subject,
-            teacher: b.teacher,
-            theater_name: b.theater_name,
-            seatFormatted: b.seat_formatted
-          }))
+          bookings: allConfirmedInSession
         });
         // Mark all as synced
         for (const cb of confirmedBookings) {
@@ -154,7 +225,7 @@ router.post('/multi', async (req, res) => {
 });
 
 // ─── POST /bookings — 单科目预订（向后兼容）─────────────────
-router.post('/', async (req, res) => {
+router.post('/', validateUserCode, async (req, res) => {
   try {
     const { theater_id, seats, name, phone, receipt_url } = req.body;
     const userCode = req.userCode;
@@ -179,9 +250,17 @@ router.post('/', async (req, res) => {
     if (!theater) return res.status(404).json({ error: 'Theater not found', message: '科室不存在' });
 
     const tabName = theater.tab_name || theater.name;
-    const occupiedSeats = await getSeatsFromSheet(tabName, theater.rows, theater.cols, theater.aisle_after);
-    if (occupiedSeats.includes(selectedSeat)) {
+    const currentBooked = await getConfirmedSeatsFromDb(theater_id);
+    if (currentBooked.includes(selectedSeat)) {
       return res.status(409).json({ error: 'Seat occupied', message: '该座位已被抢先预订，请重新选择' });
+    }
+
+    // Try to write to Google Sheet first（Sheet为主）
+    try {
+      await updateSeatInSheet(tabName, row, col, `${userCode} ${name}`, theater.aisle_after);
+    } catch (sheetsErr) {
+      console.error('⚠️ Failed to write seat to Google Sheets:', sheetsErr.message);
+      return res.status(502).json({ error: 'SheetWriteFailed', message: 'Google Sheet 写入失败，请稍后重试' });
     }
 
     const bookingId = uuidv4();
@@ -192,7 +271,6 @@ router.post('/', async (req, res) => {
     );
 
     try {
-      await updateSeatInSheet(tabName, row, col, `${userCode} ${name}`, theater.aisle_after);
       await appendBookingRecord({
         user_code: userCode, name, phone, receipt_url,
         timestamp: new Date().toISOString(),
@@ -205,7 +283,7 @@ router.post('/', async (req, res) => {
       });
       await runAsync('UPDATE bookings SET submitted_to_sheets = 1 WHERE id = ?', [bookingId]);
     } catch (sheetsErr) {
-      console.error('⚠️ Failed to sync with Google Sheets:', sheetsErr.message);
+      console.error('⚠️ Failed to sync booking record to Google Sheets:', sheetsErr.message);
     }
 
     broadcastToTheater(theater_id, { type: 'seat_booked', theater_id, seat: selectedSeat, timestamp: new Date().toISOString() });

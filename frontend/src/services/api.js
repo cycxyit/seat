@@ -7,21 +7,25 @@ const api = axios.create({
   timeout: 15000
 })
 
+let _userCode = '';
+let _adminKey = '';
+
 export function setUserCode(userCode) {
-  if (userCode) {
-    api.defaults.headers.common['X-User-Code'] = userCode
-  } else {
-    delete api.defaults.headers.common['X-User-Code']
-  }
+  _userCode = userCode || '';
 }
 
 export function setAdminKey(adminKey) {
-  if (adminKey) {
-    api.defaults.headers.common['X-Admin-Key'] = adminKey
-  } else {
-    delete api.defaults.headers.common['X-Admin-Key']
-  }
+  _adminKey = adminKey || '';
 }
+
+// 使用拦截器动态注入请求头，这比修改 defaults 更可靠
+api.interceptors.request.use(config => {
+  if (_userCode) config.headers['X-User-Code'] = _userCode;
+  if (_adminKey) config.headers['X-Admin-Key'] = _adminKey;
+  return config;
+}, error => {
+  return Promise.reject(error);
+});
 
 // ─── Public Config ──────────────────────────────────────
 export const configAPI = {
@@ -48,20 +52,17 @@ export const bookingAPI = {
   },
 
   // Multi-subject batch booking (new)
-  createMultiBooking: (bookings, name, phone, receiptUrl, sessionId) =>
-    api.post('/bookings/multi', {
-      bookings,        // [{ theater_id, seat }]
-      name,
-      phone,
-      receipt_url: receiptUrl,
-      session_id: sessionId
-    }),
+  createMultiBooking(data) {
+    // data = { bookings, userCode, name, phone, receipt_url, session_id }
+    return api.post('/bookings/multi', data)
+  },
 
   // Single subject (legacy)
   createBooking: (theaterId, seats, userCode, name, phone, receiptUrl) =>
     api.post('/bookings', { theater_id: theaterId, seats, name, phone, receipt_url: receiptUrl }),
 
-  getUserBookings: (userCode) => api.get(`/bookings/user/${userCode}`)
+  getUserBookings: (userCode) => api.get(`/bookings/user/${userCode}`),
+  checkUserCode: (userCode) => api.get(`/bookings/check-user/${userCode}`)
 }
 
 // ─── Admin ───────────────────────────────────────────────
@@ -69,7 +70,9 @@ export const adminAPI = {
   getConfig:    ()     => api.get('/admin/config'),
   updateConfig: (data) => api.put('/admin/config', data),
   createTheater: (data) => api.post('/admin/theaters', data),
-  deleteTheater: (id)   => api.delete(`/admin/theaters/${id}`)
+  deleteTheater: (id)   => api.delete(`/admin/theaters/${id}`),
+  getSyncStatus: () => api.get('/admin/sync-status'),
+  triggerSync: () => api.post('/admin/sync')
 }
 
 export default api

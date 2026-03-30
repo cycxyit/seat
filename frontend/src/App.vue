@@ -23,8 +23,11 @@
     </main>
 
     <!-- Footer -->
-    <footer class="site-footer" v-if="siteConfig.footer_text">
-      <div class="footer-inner" v-html="siteConfig.footer_text"></div>
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span v-html="siteConfig.footer_text"></span>
+        <span> | ❤️Powered by cycxtit</span>
+      </div>
     </footer>
   </div>
 </template>

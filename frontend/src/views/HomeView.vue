@@ -12,8 +12,10 @@
             <label>工号 / 代号</label>
             <input v-model="userCode" type="text" placeholder="请输入工号或代号" required autofocus />
           </div>
-          <button type="submit" class="primary btn-full" :disabled="!userCode.trim()">
-            下一步 →
+          <div v-if="userCodeNotice" class="alert error mb-16">{{ userCodeNotice }}</div>
+          <button type="submit" class="primary btn-full" :disabled="!userCode.trim() || checkingUser">
+            <span v-if="checkingUser" class="btn-loading"><span class="spinner-small"></span> 正在校验...</span>
+            <span v-else>下一步 →</span>
           </button>
         </form>
       </div>
@@ -234,12 +236,20 @@ const siteConfig = inject('siteConfig', ref({ max_subjects: '3' }))
 // ─── State ───────────────────────────────────────────────
 const currentStep   = ref(1)
 const userCode      = ref('')
+const userCodeUsed  = ref(false)
+const userCodeNotice = ref('')
 const userName      = ref('')
 const userPhone     = ref('')
+const activeSessionId = ref(null)
 const receiptFile   = ref(null)
 const receiptUrl    = ref('')
 const uploadingReceipt = ref(false)
+const checkingUser  = ref(false)
 const subjectCount  = ref('')   // how many subjects user wants to enroll
+
+const isRetryMode   = ref(false)
+const retryQueue    = ref([]) // [{ theater, seat }]
+const retryMessage  = ref('')
 
 // Step 3 multi-round state
 const currentRound         = ref(1)
@@ -269,6 +279,11 @@ const doneSubjects = computed(() =>
 )
 
 const availableSubjects = computed(() => {
+  if (isRetryMode.value && retryQueue.value.length > 0) {
+    // 兼容处理：后端返回的失败列表可能直接包含 subject 而不是嵌套在 theater 对象中
+    const set = new Set(retryQueue.value.map(s => s.subject || s.theater?.subject).filter(Boolean))
+    return [...set]
+  }
   const seen = new Set()
   for (const t of allTheaters.value) {
     if (t.subject) seen.add(t.subject)
@@ -280,15 +295,53 @@ function isSubjectDone(subject) {
   return doneSubjects.value.includes(subject)
 }
 
-const theatersForCurrentSubject = computed(() =>
-  allTheaters.value.filter(t => t.subject === currentSubject.value)
-)
+const theatersForCurrentSubject = computed(() => {
+  if (isRetryMode.value) {
+    // 兼容处理：后端返回的失败项可能直接包含 subject/theater_id
+    const targetTheaters = new Set(
+      retryQueue.value
+        .filter(r => (r.subject || r.theater?.subject) === currentSubject.value)
+        .map(r => r.theater_id || r.theater?.id)
+        .filter(Boolean)
+    )
+    return allTheaters.value.filter(t => t.subject === currentSubject.value && targetTheaters.has(t.id))
+  }
+  return allTheaters.value.filter(t => t.subject === currentSubject.value)
+})
 
 // ─── Step 1 ───────────────────────────────────────────────
-function submitStep1() {
-  if (!userCode.value.trim()) return
-  setUserCode(userCode.value.trim())
-  currentStep.value = 2
+async function submitStep1() {
+  const code = userCode.value.trim()
+  if (!code) return
+  
+  if (isRetryMode.value) {
+    // If already in retry mode, just proceed
+    setUserCode(code)
+    currentStep.value = 2
+    return
+  }
+
+  checkingUser.value = true
+  userCodeNotice.value = ''
+  try {
+    const res = await bookingAPI.checkUserCode(code)
+    if (res.data.success && res.data.exists) {
+      userCodeNotice.value = '该工号已有预约记录，请勿重复预约'
+      return
+    }
+    
+    // 初始化 Session ID，在整个重选周期内保持不变
+    if (!activeSessionId.value) {
+      activeSessionId.value = Date.now().toString(36) + Math.random().toString(36).substring(2)
+    }
+    
+    setUserCode(code)
+    currentStep.value = 2
+  } catch (err) {
+    userCodeNotice.value = '校验工号失败，请稍后重试'
+  } finally {
+    checkingUser.value = false
+  }
 }
 
 // ─── Step 2 ───────────────────────────────────────────────
@@ -388,27 +441,76 @@ async function handleSeatConfirm(seat) {
 async function submitAllBookings() {
   currentStep.value = 4  // "Submitting" screen
   try {
-    const sessionId = crypto.randomUUID()
     const bookingsPayload = completedSelections.value.map(s => ({
       theater_id: s.theater.id,
       seat: s.seat
     }))
 
-    const res = await bookingAPI.createMultiBooking(
-      bookingsPayload,
-      userName.value,
-      userPhone.value,
-      receiptUrl.value,
-      sessionId
-    )
+    const res = await bookingAPI.createMultiBooking({
+      bookings: bookingsPayload,
+      userCode: userCode.value,
+      name: userName.value,
+      phone: userPhone.value,
+      receipt_url: receiptUrl.value,
+      session_id: activeSessionId.value
+    })
 
-    bookingResult.value = res.data.data
-    currentStep.value = 5
+    handleSyncResult(res.data)
   } catch (err) {
     console.error('Multi-booking error:', err)
-    alert(err.response?.data?.message || '提交失败，请重试')
-    // Go back to last selection step
+    
+    // 强制尝试跳转回步骤 3，防止页面锁死在“正在提交”状态
+    try {
+      if (err.response?.status === 409 && err.response.data?.data) {
+        handleSyncResult(err.response.data)
+      } else {
+        alert(err.response?.data?.message || '提交失败，请重试')
+        currentStep.value = 3
+      }
+    } catch (innerErr) {
+      console.error('Inner error handling failed:', innerErr)
+      currentStep.value = 3 // 兜底：无论如何都要回去
+    }
+  }
+}
+
+function handleSyncResult(resultWrapper) {
+  if (!resultWrapper) {
     currentStep.value = 3
+    return
+  }
+  
+  const result = resultWrapper.data || {}
+  bookingResult.value = result
+
+  if (result.failed && result.failed.length > 0) {
+    // 发生了撞座冲突
+    const failedSubjectsNames = result.failed.map(f => f.subject || '未知科目').join('、')
+    
+    // 初始化/更新重试状态
+    isRetryMode.value = true
+    retryQueue.value = result.failed
+    
+    // 从已完成列表中移除那些失败的记录（使用可选链防止 c.theater_id 缺失）
+    const confirmedIds = new Set((result.confirmed || []).map(c => `${c.theater_id}-${c.seat}`))
+    completedSelections.value = completedSelections.value.filter(s => 
+      s.theater && confirmedIds.has(`${s.theater.id}-${s.seat}`)
+    )
+    
+    // 立即跳转回第 3 步（选座步）
+    currentStep.value = 3
+    currentRound.value = (result.confirmed?.length || 0) + 1
+    roundPhase.value = 'subject'
+    currentSubject.value = ''
+    currentTimeslot.value = null
+    
+    // 延迟显示提示框，确保 DOM 已经更新
+    setTimeout(() => {
+      alert(`Oops! 你手慢了，以下科目座位已被占领：\n${failedSubjectsNames}\n\n请重新选择座位。`)
+    }, 100)
+  } else {
+    // 全部成功
+    currentStep.value = 5
   }
 }
 
@@ -430,6 +532,7 @@ function formatSeatId(seatId) {
 }
 
 function resetAllFlow() {
+  activeSessionId.value = null
   userCode.value = ''
   userName.value = ''
   userPhone.value = ''

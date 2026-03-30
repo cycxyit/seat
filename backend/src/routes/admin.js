@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { runAsync, getAsync, allAsync } from '../db/init.js';
 import { validateAdminKey } from '../middleware/auth.js';
 import { createTabInSheet } from '../services/sheetsService.js';
+import { syncDatabaseFromSheet, getDbSyncStatus } from '../services/dbSyncService.js';
 
 const router = express.Router();
 
@@ -116,6 +117,25 @@ router.delete('/theaters/:id', async (req, res) => {
   } catch (err) {
     console.error('Error deleting theater:', err);
     res.status(500).json({ error: 'Failed to delete theater' });
+  }
+});
+
+// ─── 同步状态查询 ───────────────────────────────────────────
+router.get('/sync-status', async (req, res) => {
+  try {
+    res.json({ success: true, data: getDbSyncStatus() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch sync status', message: err.message });
+  }
+});
+
+// ─── 手动触发一次同步 ───────────────────────────────────────
+router.post('/sync', async (req, res) => {
+  try {
+    const status = await syncDatabaseFromSheet();
+    res.json({ success: true, data: status });
+  } catch (err) {
+    res.status(500).json({ error: 'Sync failed', message: err.message });
   }
 });
 
