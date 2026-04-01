@@ -68,7 +68,7 @@ router.post('/theaters', async (req, res) => {
     const theaterId = uuidv4();
     const finalAisleAfter = aisle_after !== undefined ? parseInt(aisle_after, 10) : 5;
     const finalDoorRow = door_row !== undefined ? parseInt(door_row, 10) : 0;
-    const tabName = `${class_time || ''} ${teacher || ''} ${name}`.trim();
+    const tabName = [class_time, subject, teacher, name].filter(Boolean).join(' ');
 
     await runAsync(
       `INSERT INTO theaters (id, name, rows, cols, aisle_after, door_row, class_time, subject, teacher, tab_name)
