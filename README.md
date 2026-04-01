@@ -1,10 +1,10 @@
 # 🏢 科室座位预订系统 (Seat Booking System)
 
 **部署前端 (Frontend):**
-[![Deploy Frontend with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/your-github-username/your-repo-name/tree/main/frontend&project-name=seat-booking-frontend&framework=vite)
+[![Deploy Frontend with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/cycxyit/seat/tree/main/frontend&project-name=seat-booking-frontend&framework=vite)
 
 **部署后端 (Backend):**
-[![Deploy Backend with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/your-github-username/your-repo-name/tree/main/backend&env=FRONTEND_URL,ADMIN_SECRET_KEY,GOOGLE_SHEETS_ID,GOOGLE_SHEETS_RANGE,GOOGLE_SERVICE_ACCOUNT_EMAIL,GOOGLE_SERVICE_ACCOUNT_KEY_PATH&project-name=seat-booking-backend)
+[![Deploy Backend with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/cycxyit/seat/tree/main/backend&env=FRONTEND_URL,ADMIN_SECRET_KEY,GOOGLE_SHEETS_ID,GOOGLE_SHEETS_RANGE,GOOGLE_SERVICE_ACCOUNT_EMAIL,GOOGLE_SERVICE_ACCOUNT_KEY_PATH&project-name=seat-booking-backend)
 
 一个企业级、现代化且支持实时响应的科室座位选择预订系统。系统集成了前后端分离架构，支持完整的工号权限校验、多科室自定义网格管理功能，并支持将预订数据无缝自动同步到 **Google Sheets** 中。
 
