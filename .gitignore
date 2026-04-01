@@ -57,3 +57,6 @@ backend/img/
 *.jpg
 *.jpeg
 *.png
+
+# Backend Data
+backend/config/service-key.json
