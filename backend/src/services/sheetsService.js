@@ -6,8 +6,13 @@ let sheetsClient = null;
 
 export async function initializeSheets() {
   try {
-    const keyPath = resolve(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || './config/service-key.json');
-    const key = JSON.parse(readFileSync(keyPath, 'utf8'));
+    let key;
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+      key = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+    } else {
+      const keyPath = resolve(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || './config/service-key.json');
+      key = JSON.parse(readFileSync(keyPath, 'utf8'));
+    }
     const auth = new google.auth.GoogleAuth({
       credentials: key,
       scopes: ['https://www.googleapis.com/auth/spreadsheets']

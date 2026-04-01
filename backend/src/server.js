@@ -41,7 +41,9 @@ if (!process.env.ADMIN_SECRET_KEY) {
 }
 
 app.use(cors({
-  origin: FRONTEND_URL,
+  origin: function (origin, callback) {
+    callback(null, true); // 动态允许任何来源（解决 Vercel 上忘记填 https:// 等格式问题）
+  },
   credentials: true,
   allowedHeaders: ['Content-Type', 'X-Admin-Key', 'X-User-Code'],
   optionsSuccessStatus: 200 // 为某些旧浏览器处理 OPTIONS 请求
@@ -80,6 +82,11 @@ app.get('/api/admin/debug-headers', (req, res) => {
 
 app.use('/api/admin', adminRoutes);
 app.use('/api/upload', uploadRoutes);
+
+// 根路径服务
+app.get('/', (req, res) => {
+  res.json({ message: 'Seat Booking Backend API is running.', status: 'ok' });
+});
 
 // 健康检查
 app.get('/api/health', (req, res) => {

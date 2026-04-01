@@ -4,10 +4,22 @@ import { getAsync, runAsync, allAsync } from '../db/init.js';
 import { getSeatMapFromSheet, updateSeatInSheet, appendBookingRecord, initializeSheets } from '../services/sheetsService.js';
 import { broadcastToTheater } from '../sseManager.js';
 import { validateUserCode } from '../middleware/auth.js';
+import { Mutex } from 'async-mutex';
 
 const router = express.Router();
 
 await initializeSheets();
+
+// ─── 内存锁：防止同一时间的并发冲突 ──────────────────────
+const seatLocks = new Map();
+
+function getSeatLock(theater_id, seat) {
+  const key = `${theater_id}-${seat}`;
+  if (!seatLocks.has(key)) {
+    seatLocks.set(key, new Mutex());
+  }
+  return seatLocks.get(key);
+}
 
 // ─── 格式化座位 ID（"2-3" → "C2"）──────────────────────────
 function formatSeatId(seatId) {
@@ -86,17 +98,76 @@ router.post('/multi', validateUserCode, async (req, res) => {
 
         const tabName = theater.tab_name || theater.name;
 
-        // --- 【核心修复】：解决死锁问题 ---
-        // 1. 检查数据库中是否已经存在该用户对该座位的“已确认”记录
-        const existingBooking = await getAsync(
-          'SELECT id FROM bookings WHERE theater_id = ? AND user_code = ? AND seats LIKE ? AND status = ?',
-          [theater_id, userCode, `%${seat}%`, 'confirmed']
-        );
+        // 获取该座位的互斥锁，防止并发执行这段逻辑
+        const lock = getSeatLock(theater_id, seat);
+        const release = await lock.acquire();
 
-        if (existingBooking) {
-          // 如果已经是自己占领的，直接视为成功，以数据库为唯一准则，避免频繁请求 Google Sheet
+        try {
+          // --- 【核心修复】：解决死锁问题 ---
+          // 1. 检查数据库中是否已经存在该用户对该座位的“已确认”记录
+          const existingBooking = await getAsync(
+            'SELECT id FROM bookings WHERE theater_id = ? AND user_code = ? AND seats LIKE ? AND status = ?',
+            [theater_id, userCode, `%${seat}%`, 'confirmed']
+          );
+
+          if (existingBooking) {
+            // 如果已经是自己占领的，直接视为成功，以数据库为唯一准则，避免频繁请求 Google Sheet
+            confirmedBookings.push({
+              booking_id: existingBooking.id,
+              theater_id,
+              theater_name: theater.name,
+              subject: theater.subject,
+              teacher: theater.teacher,
+              class_time: theater.class_time,
+              seat,
+              seat_formatted: formatSeatId(seat)
+            });
+            continue;
+          }
+
+          // 2. 如果不是自己的记录，再检查是否被别人占用
+          const currentBooked = await getConfirmedSeatsFromDb(theater_id);
+          const occupiedSet = new Set(currentBooked);
+
+          if (occupiedSet.has(seat)) {
+            failedBookings.push({ 
+              theater_id, 
+              seat, 
+              subject: theater.subject || '未命名科目',
+              reason: `Oops! 你手慢了 你选的${theater.subject || '该'}科目座位被占了，请重选` 
+            });
+            continue;
+          }
+
+          // 3. 只有全新的预订才写入 Google Sheet 和数据库
+          try {
+            await updateSeatInSheet(tabName, row, col, `${userCode} ${name}`, theater.aisle_after);
+          } catch (se) {
+            failedBookings.push({ 
+              theater_id, 
+              seat, 
+              subject: theater.subject || '未命名科目',
+              reason: `${formatSeatId(seat)} Google Sheet 更新失败，请稍后重试` 
+            });
+            continue;
+          }
+
+          const bookingId = uuidv4();
+          await runAsync(
+            `INSERT INTO bookings (id, theater_id, user_code, name, phone, receipt_url, seats, status, session_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [bookingId, theater_id, userCode, name, phone, receipt_url || '', JSON.stringify([seat]), 'confirmed', sessionId]
+          );
+
+          broadcastToTheater(theater_id, {
+            type: 'seat_booked',
+            theater_id,
+            seat,
+            timestamp: new Date().toISOString()
+          });
+
           confirmedBookings.push({
-            booking_id: existingBooking.id,
+            booking_id: bookingId,
             theater_id,
             theater_name: theater.name,
             subject: theater.subject,
@@ -105,60 +176,10 @@ router.post('/multi', validateUserCode, async (req, res) => {
             seat,
             seat_formatted: formatSeatId(seat)
           });
-          continue;
+        } finally {
+          // 无论成功还是失败，都释放锁
+          release();
         }
-
-        // 2. 如果不是自己的记录，再检查是否被别人占用
-        const currentBooked = await getConfirmedSeatsFromDb(theater_id);
-        const occupiedSet = new Set(currentBooked);
-
-        if (occupiedSet.has(seat)) {
-          failedBookings.push({ 
-            theater_id, 
-            seat, 
-            subject: theater.subject || '未命名科目',
-            reason: `Oops! 你手慢了 你选的${theater.subject || '该'}科目座位被占了，请重选` 
-          });
-          continue;
-        }
-
-        // 3. 只有全新的预订才写入 Google Sheet 和数据库
-        try {
-          await updateSeatInSheet(tabName, row, col, `${userCode} ${name}`, theater.aisle_after);
-        } catch (se) {
-          failedBookings.push({ 
-            theater_id, 
-            seat, 
-            subject: theater.subject || '未命名科目',
-            reason: `${formatSeatId(seat)} Google Sheet 更新失败，请稍后重试` 
-          });
-          continue;
-        }
-
-        const bookingId = uuidv4();
-        await runAsync(
-          `INSERT INTO bookings (id, theater_id, user_code, name, phone, receipt_url, seats, status, session_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [bookingId, theater_id, userCode, name, phone, receipt_url || '', JSON.stringify([seat]), 'confirmed', sessionId]
-        );
-
-        broadcastToTheater(theater_id, {
-          type: 'seat_booked',
-          theater_id,
-          seat,
-          timestamp: new Date().toISOString()
-        });
-
-        confirmedBookings.push({
-          booking_id: bookingId,
-          theater_id,
-          theater_name: theater.name,
-          subject: theater.subject,
-          teacher: theater.teacher,
-          class_time: theater.class_time,
-          seat,
-          seat_formatted: formatSeatId(seat)
-        });
       } catch (innerErr) {
         console.error(`Error processing booking for theater ${theater_id}:`, innerErr);
         failedBookings.push({ theater_id, seat, reason: innerErr.message });
@@ -250,49 +271,58 @@ router.post('/', validateUserCode, async (req, res) => {
     if (!theater) return res.status(404).json({ error: 'Theater not found', message: '科室不存在' });
 
     const tabName = theater.tab_name || theater.name;
-    const currentBooked = await getConfirmedSeatsFromDb(theater_id);
-    if (currentBooked.includes(selectedSeat)) {
-      return res.status(409).json({ error: 'Seat occupied', message: '该座位已被抢先预订，请重新选择' });
-    }
 
-    // Try to write to Google Sheet first（Sheet为主）
-    try {
-      await updateSeatInSheet(tabName, row, col, `${userCode} ${name}`, theater.aisle_after);
-    } catch (sheetsErr) {
-      console.error('⚠️ Failed to write seat to Google Sheets:', sheetsErr.message);
-      return res.status(502).json({ error: 'SheetWriteFailed', message: 'Google Sheet 写入失败，请稍后重试' });
-    }
-
-    const bookingId = uuidv4();
-    await runAsync(
-      `INSERT INTO bookings (id, theater_id, user_code, name, phone, receipt_url, seats, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [bookingId, theater_id, userCode, name, phone, receipt_url || '', JSON.stringify(seats), 'confirmed']
-    );
+    // 获取单科目的锁
+    const lock = getSeatLock(theater_id, selectedSeat);
+    const release = await lock.acquire();
 
     try {
-      await appendBookingRecord({
-        user_code: userCode, name, phone, receipt_url,
-        timestamp: new Date().toISOString(),
-        bookings: [{
-          subject: theater.subject || '未分类科目',
-          teacher: theater.teacher || '未知老师',
-          theater_name: theater.name,
-          seatFormatted: formatSeatId(selectedSeat)
-        }]
+      const currentBooked = await getConfirmedSeatsFromDb(theater_id);
+      if (currentBooked.includes(selectedSeat)) {
+        return res.status(409).json({ error: 'Seat occupied', message: '该座位已被抢先预订，请重新选择' });
+      }
+
+      // Try to write to Google Sheet first（Sheet为主）
+      try {
+        await updateSeatInSheet(tabName, row, col, `${userCode} ${name}`, theater.aisle_after);
+      } catch (sheetsErr) {
+        console.error('⚠️ Failed to write seat to Google Sheets:', sheetsErr.message);
+        return res.status(502).json({ error: 'SheetWriteFailed', message: 'Google Sheet 写入失败，请稍后重试' });
+      }
+
+      const bookingId = uuidv4();
+      await runAsync(
+        `INSERT INTO bookings (id, theater_id, user_code, name, phone, receipt_url, seats, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [bookingId, theater_id, userCode, name, phone, receipt_url || '', JSON.stringify(seats), 'confirmed']
+      );
+
+      try {
+        await appendBookingRecord({
+          user_code: userCode, name, phone, receipt_url,
+          timestamp: new Date().toISOString(),
+          bookings: [{
+            subject: theater.subject || '未分类科目',
+            teacher: theater.teacher || '未知老师',
+            theater_name: theater.name,
+            seatFormatted: formatSeatId(selectedSeat)
+          }]
+        });
+        await runAsync('UPDATE bookings SET submitted_to_sheets = 1 WHERE id = ?', [bookingId]);
+      } catch (sheetsErr) {
+        console.error('⚠️ Failed to sync booking record to Google Sheets:', sheetsErr.message);
+      }
+
+      broadcastToTheater(theater_id, { type: 'seat_booked', theater_id, seat: selectedSeat, timestamp: new Date().toISOString() });
+
+      res.json({
+        success: true,
+        message: '选座提交成功！',
+        data: { booking_id: bookingId, theater_name: theater.name, seat: selectedSeat, name, user_code: userCode, timestamp: new Date().toISOString() }
       });
-      await runAsync('UPDATE bookings SET submitted_to_sheets = 1 WHERE id = ?', [bookingId]);
-    } catch (sheetsErr) {
-      console.error('⚠️ Failed to sync booking record to Google Sheets:', sheetsErr.message);
+    } finally {
+      release();
     }
-
-    broadcastToTheater(theater_id, { type: 'seat_booked', theater_id, seat: selectedSeat, timestamp: new Date().toISOString() });
-
-    res.json({
-      success: true,
-      message: '选座提交成功！',
-      data: { booking_id: bookingId, theater_name: theater.name, seat: selectedSeat, name, user_code: userCode, timestamp: new Date().toISOString() }
-    });
   } catch (err) {
     console.error('Error creating booking:', err);
     res.status(500).json({ error: 'Failed to create booking', message: err.message });
