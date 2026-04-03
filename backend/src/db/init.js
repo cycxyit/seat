@@ -1,11 +1,9 @@
 import { createClient } from '@libsql/client';
-import dotenv from 'dotenv';
-dotenv.config();
 
 // The user states they are using Vercel, so local fallback is less relevant, 
 // but we provide a default in case it's run locally without env vars just to avoid immediate crash.
-const dbUrl = process.env.TURSO_DATABASE_URL || 'file:./data/cinema.db';
-const authToken = process.env.TURSO_AUTH_TOKEN;
+const dbUrl = process.env.TURSO_DATABASE_URL || 'libsql://bzb-cycxtit.aws-ap-northeast-1.turso.io';
+const authToken = process.env.TURSO_AUTH_TOKEN || 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzUwMjUxODEsImlkIjoiMDE5ZDQ3YmQtZmIwMS03Y2IyLWFmYzQtOTJhYTQ2ZjU1OTQ3IiwicmlkIjoiZDVmMDljZjItMzI1Yy00MWFhLWJkODEtZWJkMThiMWU1ZmExIn0.g5GsbyoQe10QmrGWO2bZ-Z8X0MOtPYY1Lmu1Mz6Vgmlhf1Su8lhiuUigex0UVxfhUl4c0faq9o4lntRaLbXfAQ';
 
 let client = null;
 
@@ -14,6 +12,9 @@ export function getDatabase() {
 }
 
 export async function initializeDatabase() {
+  if (!dbUrl) {
+    throw new Error('TURSO_DATABASE_URL environment variable is required');
+  }
   try {
     client = createClient({
       url: dbUrl,
