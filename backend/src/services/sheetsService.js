@@ -42,37 +42,56 @@ function getSpreadsheetId() {
   return process.env.GOOGLE_SHEETS_ID;
 }
 
-function getPhysicalPosition(r, c, aisleAfter) {
-  const physicalRow = r * 2 + 2;
-  let physicalCol = c + 1;
-  const aisleThreshold = parseInt(aisleAfter, 10);
-  if (aisleThreshold > 0 && c > aisleThreshold) {
-    physicalCol += 1;
+function normalizeAisles(aisles) {
+  if (Array.isArray(aisles)) {
+    return aisles.map(a => parseInt(a, 10)).filter(a => !Number.isNaN(a));
   }
-  return { pRow: physicalRow, pCol: physicalCol };
+  if (typeof aisles === 'string') {
+    try {
+      const parsed = JSON.parse(aisles);
+      if (Array.isArray(parsed)) {
+        return parsed.map(a => parseInt(a, 10)).filter(a => !Number.isNaN(a));
+      }
+      const num = parseInt(aisles, 10);
+      return Number.isNaN(num) ? [5] : [num];
+    } catch {
+      const num = parseInt(aisles, 10);
+      return Number.isNaN(num) ? [5] : [num];
+    }
+  }
+  const num = parseInt(aisles, 10);
+  return Number.isNaN(num) ? [5] : [num];
 }
 
-function getLogicalPosition(pRowIndex, pColIndex, maxCols, aisleAfter) {
+function getPhysicalPosition(r, c, aisles) {
+  const physicalRow = r * 2 + 2;
+  let physicalCol = c + 1;
+  const aislePositions = normalizeAisles(aisles);
+  for (const aisleNum of aislePositions) {
+    if (aisleNum > 0 && c > aisleNum) {
+      physicalCol += 1;
+    }
+  }
+  return { physicalRow, physicalCol };
+}
+
+function getLogicalPosition(pRowIndex, pColIndex, maxCols, aisles) {
   const physicalRow = pRowIndex + 1;
   if ((physicalRow - 2) % 2 !== 0) return null;
   const r = Math.floor((physicalRow - 2) / 2);
   if (r < 1) return null;
 
   const physCol = pColIndex + 1;
-  let c;
   if (physCol === 1) return null;
 
-  const aisleThreshold = parseInt(aisleAfter, 10);
-  if (aisleThreshold > 0) {
-    if (physCol <= aisleThreshold + 1) {
-      c = physCol - 1;
-    } else if (physCol === aisleThreshold + 2) {
-      return null;
-    } else {
-      c = physCol - 2;
+  const aislePositions = normalizeAisles(aisles);
+  let c = physCol - 1;
+
+  // If there are multiple aisle columns, shift back for each aisle column before current position
+  for (const aisleNum of aislePositions) {
+    if (aisleNum > 0 && physCol > aisleNum + 1) {
+      c -= 1;
     }
-  } else {
-    c = physCol - 1;
   }
 
   if (c > maxCols || c < 1) return null;
@@ -123,8 +142,8 @@ export async function getSeatValueFromSheet(tabName, row, col, aisleAfter = 5) {
   const spreadsheetId = getSpreadsheetId();
   if (!spreadsheetId) return '';
 
-  const { pRow, pCol } = getPhysicalPosition(row, col, aisleAfter);
-  const cellRef = `${colToLetter(pCol)}${pRow}`;
+  const { physicalRow, physicalCol } = getPhysicalPosition(row, col, aisleAfter);
+  const cellRef = `${colToLetter(physicalCol)}${physicalRow}`;
   const range = `'${tabName}'!${cellRef}`;
 
   try {
@@ -141,12 +160,13 @@ export async function getSeatValueFromSheet(tabName, row, col, aisleAfter = 5) {
 }
 
 // ─── 2. 更新座位格 ────────────────────────────────────────────
-export async function updateSeatInSheet(tabName, row, col, infoString, aisleAfter = 5) {
+export async function updateSeatInSheet(tabName, row, col, infoString, aisles = [5]) {
   if (!sheetsClient) return false;
   try {
     const spreadsheetId = getSpreadsheetId();
-    const { pRow, pCol } = getPhysicalPosition(row, col, aisleAfter);
-    const cellRef = `${colToLetter(pCol)}${pRow}`;
+    const { physicalRow, physicalCol } = getPhysicalPosition(row, col, aisles);
+    const cellRef = `${colToLetter(physicalCol)}${physicalRow}`;
+    console.log(`Updating seat: tabName=${tabName}, row=${row}, col=${col}, aisles=${JSON.stringify(aisles)}, physicalRow=${physicalRow}, physicalCol=${physicalCol}, cellRef=${cellRef}`);
     const range = `'${tabName}'!${cellRef}`;
 
     await sheetsClient.spreadsheets.values.update({
@@ -170,34 +190,39 @@ export async function appendBookingRecord(bookingData) {
   try {
     const spreadsheetId = getSpreadsheetId();
     const recordsTab = process.env.GOOGLE_SHEETS_RECORDS_TAB || '总名单';
-    const { session_id, user_code, name, phone, receipt_url, timestamp, bookings = [] } = bookingData;
+    const { session_id, user_code, name, student_id, parent_phone, phone, receipt_url, timestamp, bookings = [] } = bookingData;
     
-    const maxSubCols = parseInt(process.env.MAX_SUBJECTS || '3', 10);
+    const maxSubCols = parseInt(process.env.MAX_SUBJECTS || '10', 10);
 
     // 确保表头存在且布局一致
     await ensureRecordsTabAndHeader(spreadsheetId, recordsTab, maxSubCols);
 
-    // 构造行数据 (严格按照用户给定的 A-R 规范):
+    // 构造行数据 (严格按照用户给定的 A-T 规范):
     // A (0): 提交时间
     // B (1): 工号 (user_code)
     // C (2): 姓名 (name)
-    // D (3): 电话 (phone)
-    // E (4): 补几科 (bookings.length)
-    // F-I (5-8): 科目1 (科目, 老师, 科室, 座位)
-    // J-M (9-12): 科目2
-    // N-Q (13-16): 科目3
-    // R (17): 凭证链接
-    const row = new Array(18).fill(''); 
+    // D (3): Student ID (student_id)
+    // E (4): Parent's Phone (parent_phone)
+    // F (5): 电话 (phone)
+    // G (6): 补几科 (bookings.length)
+    // H-K (7-10): 科目1 (科目, 老师, 科室, 座位)
+    // L-O (11-14): 科目2
+    // P-S (15-18): 科目3
+    // ... 更多科目
+    // 最后: 凭证链接
+    const row = new Array(7 + maxSubCols * 4).fill(''); 
     row[0] = timestamp || new Date().toISOString();
     row[1] = user_code || '';
     row[2] = name || '';
-    row[3] = phone || '';
-    row[4] = bookings.length;
+    row[3] = student_id || '';
+    row[4] = parent_phone || '';
+    row[5] = phone || '';
+    row[6] = bookings.length;
     
-    // 填充科目信息 (F-Q)
+    // 填充科目信息 (H-S)
     for (let i = 0; i < maxSubCols; i++) {
-        const startIdx = 5 + (i * 4); // F(5), J(9), N(13)
-        if (bookings[i] && startIdx < 17) {
+        const startIdx = 7 + (i * 4); // H(7), L(11), P(15)
+        if (bookings[i] && startIdx < row.length - 1) {
             row[startIdx] = bookings[i].subject || '';
             row[startIdx + 1] = bookings[i].teacher || '';
             row[startIdx + 2] = bookings[i].theater_name || '';
@@ -205,7 +230,7 @@ export async function appendBookingRecord(bookingData) {
         }
     }
     
-    row[17] = receipt_url || '';
+    row[row.length - 1] = receipt_url || '';
 
     // --- 查找并更新现有行 (以 工号 UserCode 为唯一基准进行合并) ---
     const fullDataRes = await sheetsClient.spreadsheets.values.get({ spreadsheetId, range: `'${recordsTab}'!B:B` });
@@ -218,14 +243,14 @@ export async function appendBookingRecord(bookingData) {
 
     if (existingRowIndex !== -1) {
       // 覆盖更新
-      const range = `'${recordsTab}'!A${existingRowIndex + 1}:R${existingRowIndex + 1}`;
+      const range = `'${recordsTab}'!A${existingRowIndex + 1}:${colToLetter(row.length)}${existingRowIndex + 1}`;
       await sheetsClient.spreadsheets.values.update({
         spreadsheetId, range, valueInputOption: 'USER_ENTERED', requestBody: { values: [row] }
       });
       console.log(`✅ Master record updated at row ${existingRowIndex + 1} (User: ${user_code})`);
     } else {
       // 追加新行
-      const range = `'${recordsTab}'!A:R`;
+      const range = `'${recordsTab}'!A:${colToLetter(row.length)}`;
       await sheetsClient.spreadsheets.values.append({
         spreadsheetId, range, valueInputOption: 'USER_ENTERED', requestBody: { values: [row] }
       });
@@ -250,22 +275,20 @@ async function ensureRecordsTabAndHeader(spreadsheetId, tabName, subjectCount) {
     }
 
     // Build header row
-    // A:提交时间, B:工号, C:姓名, D:电话, E:补几科
-    const header = ['提交时间', '工号', '姓名', '电话', '补几科'];
+    // A:提交时间, B:工号, C:姓名, D:Student ID, E:Parent's Phone, F:电话, G:补几科
+    const header = ['提交时间', '工号', '姓名', 'Student ID', '家长电话', '电话', '补几科'];
     for (let i = 1; i <= subjectCount; i++) {
         header.push(`科目${i}`, `老师${i}`, `科室${i}`, `座位${i}`);
     }
     
-    // 确保凭证链接在 R 列 (Index 17)
-    while (header.length < 17) {
-        header.push('');
-    }
-    header[17] = '凭证链接';
+    // 确保凭证链接在最后
+    header.push('凭证链接');
 
     // 强力校准：每次同步都检查一次表头，如果不匹配则重写（或至少确保第一次写入是正确的）
+    const headerRange = `'${tabName}'!A1:${colToLetter(header.length)}1`;
     await sheetsClient.spreadsheets.values.update({
         spreadsheetId,
-        range: `'${tabName}'!A1:R1`,
+        range: headerRange,
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [header] }
     });
@@ -277,7 +300,7 @@ async function ensureRecordsTabAndHeader(spreadsheetId, tabName, subjectCount) {
 // ─── 4. 管理员创建科室时建 Tab 并格式化 ──────────────────────
 export async function createTabInSheet(options) {
   if (!sheetsClient) return;
-  const { title, theaterName, rows, cols, aisleAfter, doorRow, classTime, subject, teacher } = options;
+  const { title, theaterName, rows, cols, aisles, doorRow, classTime, subject, teacher } = options;
   try {
     const spreadsheetId = getSpreadsheetId();
     const meta = await sheetsClient.spreadsheets.get({ spreadsheetId });
@@ -293,7 +316,8 @@ export async function createTabInSheet(options) {
     });
 
     const sheetId = addSheetResponse.data.replies[0].addSheet.properties.sheetId;
-    const maxPhysCols = aisleAfter > 0 && aisleAfter < cols ? cols + 1 : cols;
+    const aislePositions = Array.isArray(aisles) ? aisles : [aisles || 5];
+    const maxPhysCols = cols + aislePositions.length;
     const endColIndex = maxPhysCols + 1;
     const requests = [];
 

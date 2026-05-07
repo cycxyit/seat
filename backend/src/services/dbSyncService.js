@@ -26,11 +26,12 @@ export async function syncDatabaseFromSheet() {
   const errors = [];
 
   try {
-    const theaters = await allAsync('SELECT id, tab_name, name, rows, cols, aisle_after FROM theaters');
+    const theaters = await allAsync('SELECT id, tab_name, name, rows, cols, aisle_after, aisles FROM theaters');
     for (const theater of theaters) {
       try {
         const tabName = theater.tab_name || theater.name;
-        const seatMap = await getSeatMapFromSheet(tabName, theater.rows, theater.cols, theater.aisle_after);
+        const aisleConfig = theater.aisles || theater.aisle_after;
+        const seatMap = await getSeatMapFromSheet(tabName, theater.rows, theater.cols, aisleConfig);
         const sheetSeats = Object.keys(seatMap);
         const sheetSeatSet = new Set(sheetSeats);
 

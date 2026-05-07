@@ -17,13 +17,13 @@
 - ✅ **可视化选座网格** — 极具商务风的现代化选座界面，贴近真实办公场景的设计。
 - ✅ **实时座位并发控制** — 结合数据库判断与 SSE (Server-Sent Events) 实时推送，防并发超卖，有效防止座位冲突。
 - ✅ **Google Sheets 自动同步** — 预订成功的明细第一时间同步到企业的 Google 数据表格。
-- ✅ **本地双重数据兜底** — SQLite 本地运行留底保存，即便网络环境不稳也有据可查。
+- ✅ **本地双重数据兜底** — Turso 云端运行留底保存，即使网络环境不稳也有据可查。
 - ✅ **全平台响应式** — PC、平板与手机端完美自适应适配。
 
 ## 🛠️ 技术栈 (Tech Stack)
 
 - **前端 (Frontend):** Vue 3, Vite, Axios, Vue Router
-- **后端 (Backend):** Node.js, Express, SQLite3 (数据库)
+- **后端 (Backend):** Node.js, Express, Turso (数据库)
 - **第三方集成 (Integrations):** Google Sheets API v4
 
 ---
@@ -80,7 +80,7 @@ GOOGLE_SERVICE_ACCOUNT_KEY_PATH=./config/service-key.json
 5. 在你的 Google 云盘中新建一个空表格，点击“分享”，输入刚才的“服务账号邮箱”，赋予 **编辑权限**。
 
 ### 第 4 步: 初始化数据库
-必须要先初始化本地的 SQLite 数据库文件结构才可以运行项目：
+必须先配置 Turso 数据库环境变量才可以运行项目：
 ```bash
 cd backend
 npm run init:db    # 建立表结构
@@ -116,16 +116,9 @@ npm run dev
 3. 在 **Configure Project** 选项卡中，配置以下选项：
    - **Framework Preset**: 选择 `Vite`。
    - **Root Directory**: (此项如需要分别部署可点选 `frontend`)，若采用根目录复合代理（配合 `vercel.json`），请将 Build Command 填写为对应的前端构建即可（由于 Vercel Serverless 特性，不推荐前后一并强行跑在一台机）。
-   - 由于 SQLite 在 Vercel 的 Serverless（无服务器）环境中是**易失的**（即：每当 Vercel 冷启动或重新部署，所有落入本地 SQLite `.db` 文件的数据将被清空重置）。
 4. **Environment Variables**:
-   将您本地 `.env` 中的变量逐一复制进去（比如 `ADMIN_SECRET_KEY`, `GOOGLE_SHEETS_ID` 等）。Google 密钥建议直接转换成 Base64 塞进环境变量避免提交流程问题。
+   将您本地 `.env` 中的变量逐一复制进去（比如 `ADMIN_SECRET_KEY`, `GOOGLE_SHEETS_ID`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` 等）。Google 密钥建议直接转换成 Base64 塞进环境变量避免提交流程问题。
 5. 点击 **Deploy**，等待构建完成出网。
-
-> ⚠️ **关于 Vercel 上运行 SQLite 的强烈警告**：
-> Vercel 是无状态的 Serverless 云平台，不支持持久化写入本机文件系统。
-> **如果坚持在 Vercel 生产环境上运行该项目，必须做到以下之一**：
-> 1. 完全依赖 Google Sheets 数据源作为真理数据库，失去本地容灾留底功能。
-> 2. *(推荐)* 修改 `backend/src/db/init.js` 的引用连接，改用例如 `Turso` 或 `Vercel Postgres` 等远程 SQL 数据库引擎以长期留存订单记录。
 
 ---
 

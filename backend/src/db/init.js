@@ -1,11 +1,9 @@
 import { createClient } from '@libsql/client';
-import dotenv from 'dotenv';
-dotenv.config();
 
 // The user states they are using Vercel, so local fallback is less relevant, 
 // but we provide a default in case it's run locally without env vars just to avoid immediate crash.
-const dbUrl = process.env.TURSO_DATABASE_URL || 'file:./data/cinema.db';
-const authToken = process.env.TURSO_AUTH_TOKEN;
+const dbUrl = process.env.TURSO_DATABASE_URL || 'libsql://bzb-cycxtit.aws-ap-northeast-1.turso.io';
+const authToken = process.env.TURSO_AUTH_TOKEN || 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzUwMjUxODEsImlkIjoiMDE5ZDQ3YmQtZmIwMS03Y2IyLWFmYzQtOTJhYTQ2ZjU1OTQ3IiwicmlkIjoiZDVmMDljZjItMzI1Yy00MWFhLWJkODEtZWJkMThiMWU1ZmExIn0.g5GsbyoQe10QmrGWO2bZ-Z8X0MOtPYY1Lmu1Mz6Vgmlhf1Su8lhiuUigex0UVxfhUl4c0faq9o4lntRaLbXfAQ';
 
 let client = null;
 
@@ -14,6 +12,9 @@ export function getDatabase() {
 }
 
 export async function initializeDatabase() {
+  if (!dbUrl) {
+    throw new Error('TURSO_DATABASE_URL environment variable is required');
+  }
   try {
     client = createClient({
       url: dbUrl,
@@ -43,6 +44,7 @@ async function createTheatersTable() {
       rows INTEGER NOT NULL,
       cols INTEGER NOT NULL,
       aisle_after INTEGER DEFAULT 5,
+      aisles TEXT DEFAULT '[5]',
       door_row INTEGER DEFAULT 0,
       class_time TEXT,
       subject TEXT,
@@ -87,6 +89,9 @@ async function migrateSchema() {
     `ALTER TABLE theaters ADD COLUMN class_time TEXT`,
     `ALTER TABLE theaters ADD COLUMN tab_name TEXT`,
     `ALTER TABLE bookings ADD COLUMN session_id TEXT`,
+    `ALTER TABLE bookings ADD COLUMN student_id TEXT`,
+    `ALTER TABLE bookings ADD COLUMN parent_phone TEXT`,
+    `ALTER TABLE theaters ADD COLUMN aisles TEXT DEFAULT '[5]'`, // JSON array of aisle positions
   ];
   
   for (const sql of migrations) {
@@ -102,7 +107,7 @@ async function migrateSchema() {
 
 async function seedDefaultConfig() {
   const defaults = [
-    ['max_subjects', '3'],
+    ['max_subjects', '10'],
     ['site_name', '科室座位预订系统'],
     ['logo_url', ''],
     ['footer_text', '© 2025 科室座位预订系统. All rights reserved.'],
@@ -110,7 +115,7 @@ async function seedDefaultConfig() {
   
   for (const [key, value] of defaults) {
     await client.execute({
-      sql: `INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)`,
+      sql: `INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)`,
       args: [key, value]
     });
   }

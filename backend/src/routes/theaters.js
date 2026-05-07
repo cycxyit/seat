@@ -8,9 +8,11 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const theaters = await allAsync(
-      'SELECT id, name, rows, cols, aisle_after, door_row, class_time, subject, teacher, tab_name FROM theaters ORDER BY subject, class_time ASC'
+      'SELECT id, name, rows, cols, aisle_after, aisles, door_row, class_time, subject, teacher, tab_name FROM theaters ORDER BY subject, class_time ASC'
     );
-    res.json({ success: true, data: theaters || [], count: theaters?.length || 0 });
+    // Parse aisles JSON
+    const processed = theaters.map(t => ({ ...t, aisles: JSON.parse(t.aisles || '[5]') }));
+    res.json({ success: true, data: processed || [], count: processed?.length || 0 });
   } catch (err) {
     console.error('Error fetching theaters:', err);
     res.status(500).json({ error: 'Failed to fetch theaters' });
@@ -21,10 +23,11 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const theater = await getAsync(
-      'SELECT id, name, rows, cols, aisle_after, door_row, class_time, subject, teacher, tab_name FROM theaters WHERE id = ?',
+      'SELECT id, name, rows, cols, aisle_after, aisles, door_row, class_time, subject, teacher, tab_name FROM theaters WHERE id = ?',
       [req.params.id]
     );
     if (!theater) return res.status(404).json({ error: 'Theater not found' });
+    theater.aisles = JSON.parse(theater.aisles || '[5]');
     res.json({ success: true, data: theater });
   } catch (err) {
     console.error('Error fetching theater:', err);
@@ -36,10 +39,11 @@ router.get('/:id', async (req, res) => {
 router.get('/:id/seats', async (req, res) => {
   try {
     const theater = await getAsync(
-      'SELECT id, name, rows, cols, aisle_after, door_row, class_time, subject, teacher, tab_name FROM theaters WHERE id = ?',
+      'SELECT id, name, rows, cols, aisle_after, aisles, door_row, class_time, subject, teacher, tab_name FROM theaters WHERE id = ?',
       [req.params.id]
     );
     if (!theater) return res.status(404).json({ error: 'Theater not found' });
+    theater.aisles = JSON.parse(theater.aisles || '[5]');
 
     const bookings = await allAsync(
       'SELECT seats FROM bookings WHERE theater_id = ? AND status = ?',
