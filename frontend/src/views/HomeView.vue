@@ -33,6 +33,14 @@
             <input v-model="userName" type="text" placeholder="请输入真实姓名" required />
           </div>
           <div class="field">
+            <label>Student ID <span class="req">*</span></label>
+            <input v-model="studentId" type="text" placeholder="请输入学号" required />
+          </div>
+          <div class="field">
+            <label>家长电话 <span class="req">*</span></label>
+            <input v-model="parentPhone" type="tel" placeholder="请输入家长电话" required />
+          </div>
+          <div class="field">
             <label>手机号码 <span class="req">*</span></label>
             <input v-model="userPhone" type="tel" placeholder="请输入手机号码" required />
           </div>
@@ -214,6 +222,7 @@
         <div class="receipt-meta">
           <div>预订人：<strong>{{ userName }}</strong></div>
           <div>工号：<strong>{{ userCode }}</strong></div>
+          <div>学号：<strong>{{ studentId }}</strong></div>
         </div>
 
         <button class="primary btn-full" @click="resetAllFlow" style="margin-top: 24px;">
@@ -239,6 +248,8 @@ const userCode      = ref('')
 const userCodeUsed  = ref(false)
 const userCodeNotice = ref('')
 const userName      = ref('')
+const studentId     = ref('')
+const parentPhone   = ref('')
 const userPhone     = ref('')
 const activeSessionId = ref(null)
 const receiptFile   = ref(null)
@@ -351,7 +362,7 @@ function onFileChange(e) {
 }
 
 async function submitStep2() {
-  if (!userName.value || !userPhone.value || !receiptFile.value || !subjectCount.value) {
+  if (!userName.value || !studentId.value || !parentPhone.value || !userPhone.value || !receiptFile.value || !subjectCount.value) {
     alert('请填写所有信息并上传凭证')
     return
   }
@@ -450,6 +461,8 @@ async function submitAllBookings() {
       bookings: bookingsPayload,
       userCode: userCode.value,
       name: userName.value,
+      student_id: studentId.value,
+      parent_phone: parentPhone.value,
       phone: userPhone.value,
       receipt_url: receiptUrl.value,
       session_id: activeSessionId.value
@@ -535,6 +548,8 @@ function resetAllFlow() {
   activeSessionId.value = null
   userCode.value = ''
   userName.value = ''
+  studentId.value = ''
+  parentPhone.value = ''
   userPhone.value = ''
   receiptFile.value = null
   receiptUrl.value = ''

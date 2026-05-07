@@ -17,7 +17,7 @@ bzd/
 │   ├── 📁 config/                     # 配置文件目录
 │   │   └── 📝 service-key.json [待创建] # Google 服务账号密钥
 │   ├── 📁 data/                       # 数据库文件目录 [运行时创建]
-│   │   └── cinema.db [待创建]         # SQLite 数据库
+│   │   └── cinema.db [已移除，使用 Turso 云数据库]         # SQLite 数据库
 │   ├── 📁 src/                        # 源代码
 │   │   ├── 📄 server.js               # Express 主服务器
 │   │   ├── 📁 db/
@@ -78,7 +78,7 @@ Express.js 后端 (http://localhost:5000)
     └─ 服务：提交到 Google Sheets
     ↓
 数据存储
-    ├─ SQLite 数据库 (backend/data/cinema.db)
+    ├─ Turso 云数据库 (libSQL)
     │   ├─ theaters 表   → 影厅信息
     │   └─ bookings 表   → 预订记录
     └─ Google Sheets    → 预订备份和报告
@@ -94,7 +94,7 @@ Express.js 后端 (http://localhost:5000)
     "express": "^4.18.2",              // Web 框架
     "cors": "^2.8.5",                  // 跨域支持
     "dotenv": "^16.3.1",               // 环境变量
-    "sqlite3": "^5.1.6",               // SQLite 数据库
+    "@libsql/client": "^0.17.2",       // Turso 数据库
     "uuid": "^9.0.0",                  // UUID 生成
     "google-auth-library": "^9.2.0",   // Google 认证
     "googleapis": "^118.0.0"            // Google APIs

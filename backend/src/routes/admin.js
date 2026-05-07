@@ -49,7 +49,7 @@ router.put('/config', async (req, res) => {
 // ─── 创建新科室 ─────────────────────────────────────────────
 router.post('/theaters', async (req, res) => {
   try {
-    const { name, rows, cols, subject, teacher, aisle_after, class_time, door_row } = req.body;
+    const { name, rows, cols, subject, teacher, aisle_after, aisles, class_time, door_row } = req.body;
 
     if (!name || !rows || !cols) {
       return res.status(400).json({
@@ -67,13 +67,14 @@ router.post('/theaters', async (req, res) => {
 
     const theaterId = uuidv4();
     const finalAisleAfter = aisle_after !== undefined ? parseInt(aisle_after, 10) : 5;
+    const finalAisles = aisles ? JSON.stringify(aisles) : JSON.stringify([finalAisleAfter]);
     const finalDoorRow = door_row !== undefined ? parseInt(door_row, 10) : 0;
     const tabName = [class_time, subject, teacher, name].filter(Boolean).join(' ');
 
     await runAsync(
-      `INSERT INTO theaters (id, name, rows, cols, aisle_after, door_row, class_time, subject, teacher, tab_name)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [theaterId, name, rows, cols, finalAisleAfter, finalDoorRow, class_time || '', subject || '', teacher || '', tabName]
+      `INSERT INTO theaters (id, name, rows, cols, aisle_after, aisles, door_row, class_time, subject, teacher, tab_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [theaterId, name, rows, cols, finalAisleAfter, finalAisles, finalDoorRow, class_time || '', subject || '', teacher || '', tabName]
     );
 
     try {
@@ -82,7 +83,7 @@ router.post('/theaters', async (req, res) => {
         theaterName: name,
         rows,
         cols,
-        aisleAfter: finalAisleAfter,
+        aisles: JSON.parse(finalAisles),
         doorRow: finalDoorRow,
         classTime: class_time,
         subject,
@@ -95,7 +96,7 @@ router.post('/theaters', async (req, res) => {
     res.json({
       success: true,
       message: '科室创建成功！',
-      data: { id: theaterId, name, rows, cols, aisle_after: finalAisleAfter, door_row: finalDoorRow, class_time, subject, teacher, tab_name: tabName }
+      data: { id: theaterId, name, rows, cols, aisle_after: finalAisleAfter, aisles: JSON.parse(finalAisles), door_row: finalDoorRow, class_time, subject, teacher, tab_name: tabName }
     });
   } catch (err) {
     console.error('Error creating theater:', err);

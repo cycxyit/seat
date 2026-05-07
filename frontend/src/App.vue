@@ -40,7 +40,7 @@ const siteConfig = ref({
   site_name: '科室座位预订系统',
   logo_url: '',
   footer_text: '© 2025 科室座位预订系统. All rights reserved.',
-  max_subjects: '3'
+  max_subjects: '10'
 })
 const logoError = ref(false)
 

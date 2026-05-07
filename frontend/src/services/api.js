@@ -53,7 +53,7 @@ export const bookingAPI = {
 
   // Multi-subject batch booking (new)
   createMultiBooking(data) {
-    // data = { bookings, userCode, name, phone, receipt_url, session_id }
+    // data = { bookings, userCode, name, student_id, parent_phone, phone, receipt_url, session_id }
     return api.post('/bookings/multi', data)
   },
 

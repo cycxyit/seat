@@ -64,14 +64,16 @@ router.get('/check-user/:user_code', async (req, res) => {
 // ─── POST /bookings/multi — 多科目批量预订 ──────────────────
 router.post('/multi', validateUserCode, async (req, res) => {
   try {
-    const { bookings, name, phone, receipt_url, session_id } = req.body;
+    const { bookings, name, student_id, parent_phone, phone, receipt_url, session_id } = req.body;
     const userCode = req.userCode;
+
+    console.log('Received multi booking request:', { bookings, name, student_id, parent_phone, phone, receipt_url, session_id, userCode });
 
     if (!bookings || !Array.isArray(bookings) || bookings.length === 0) {
       return res.status(400).json({ error: 'Invalid input', message: '请至少提供一个预订' });
     }
-    if (!name || !phone) {
-      return res.status(400).json({ error: 'Missing personal info', message: '请提供姓名和电话号码' });
+    if (!name || !student_id || !parent_phone || !phone) {
+      return res.status(400).json({ error: 'Missing personal info', message: '请提供姓名、学号、家长电话和手机号码' });
     }
 
     const sessionId = session_id || uuidv4();
@@ -81,20 +83,24 @@ router.post('/multi', validateUserCode, async (req, res) => {
     // Process each subject booking independently
     for (const booking of bookings) {
       const { theater_id, seat } = booking;
+      console.log(`Processing booking: theater_id=${theater_id}, seat=${seat}, user=${userCode}`);
       try {
         const [rowRaw, colRaw] = String(seat).split('-');
         const row = parseInt(rowRaw, 10);
         const col = parseInt(colRaw, 10);
 
         const theater = await getAsync(
-          'SELECT id, name, rows, cols, aisle_after, door_row, class_time, subject, teacher, tab_name FROM theaters WHERE id = ?',
+          'SELECT id, name, rows, cols, aisle_after, aisles, door_row, class_time, subject, teacher, tab_name FROM theaters WHERE id = ?',
           [theater_id]
         );
 
         if (!theater) {
+          console.log(`Theater ${theater_id} not found`);
           failedBookings.push({ theater_id, seat, subject: '未知科目', reason: '科室不存在' });
           continue;
         }
+
+        console.log(`Found theater: ${theater.name}, aisles: ${theater.aisles}`);
 
         const tabName = theater.tab_name || theater.name;
 
@@ -127,9 +133,11 @@ router.post('/multi', validateUserCode, async (req, res) => {
 
           // 2. 如果不是自己的记录，再检查是否被别人占用
           const currentBooked = await getConfirmedSeatsFromDb(theater_id);
+          console.log(`Current booked seats for theater ${theater_id}:`, currentBooked);
           const occupiedSet = new Set(currentBooked);
 
           if (occupiedSet.has(seat)) {
+            console.log(`Seat ${seat} is occupied in DB`);
             failedBookings.push({ 
               theater_id, 
               seat, 
@@ -141,7 +149,7 @@ router.post('/multi', validateUserCode, async (req, res) => {
 
           // 3. 只有全新的预订才写入 Google Sheet 和数据库
           try {
-            await updateSeatInSheet(tabName, row, col, `${userCode} ${name}`, theater.aisle_after);
+            await updateSeatInSheet(tabName, row, col, `${userCode} ${name}`, theater.aisles);
           } catch (se) {
             failedBookings.push({ 
               theater_id, 
@@ -154,9 +162,9 @@ router.post('/multi', validateUserCode, async (req, res) => {
 
           const bookingId = uuidv4();
           await runAsync(
-            `INSERT INTO bookings (id, theater_id, user_code, name, phone, receipt_url, seats, status, session_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [bookingId, theater_id, userCode, name, phone, receipt_url || '', JSON.stringify([seat]), 'confirmed', sessionId]
+            `INSERT INTO bookings (id, theater_id, user_code, name, student_id, parent_phone, phone, receipt_url, seats, status, session_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [bookingId, theater_id, userCode, name, student_id, parent_phone, phone, receipt_url || '', JSON.stringify([seat]), 'confirmed', sessionId]
           );
 
           broadcastToTheater(theater_id, {
@@ -211,6 +219,8 @@ router.post('/multi', validateUserCode, async (req, res) => {
           session_id: sessionId,
           user_code: userCode,
           name,
+          student_id,
+          parent_phone,
           phone,
           receipt_url,
           timestamp: new Date().toISOString(),

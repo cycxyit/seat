@@ -27,12 +27,6 @@ backend/dist/
 credentials.json
 backend/credentials.json
 
-# SQLite databases (if any local DBs remain)
-*.sqlite
-*.sqlite3
-*.db
-backend/dev.db
-
 # OS Generated Files
 .DS_Store
 .DS_Store?

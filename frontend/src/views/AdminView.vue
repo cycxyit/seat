@@ -75,7 +75,7 @@
             <div class="field">
               <label>最多可补几科（学生可选科目上限）</label>
               <select v-model="configForm.max_subjects">
-                <option v-for="n in 5" :key="n" :value="String(n)">最多 {{ n }} 科</option>
+                <option v-for="n in 10" :key="n" :value="String(n)">最多 {{ n }} 科</option>
               </select>
             </div>
             <button type="submit" class="primary" :disabled="savingConfig">

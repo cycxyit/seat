@@ -66,7 +66,7 @@
           <div class="seats-row">
             <template v-for="col in theater.cols" :key="'h-'+col">
               <div class="col-label">{{ String.fromCharCode(64 + col) }}</div>
-              <div v-if="theater.aisle_after && col === theater.aisle_after" class="aisle-gap"></div>
+              <div v-if="theater.aisles && theater.aisles.includes(col)" class="aisle-gap"></div>
             </template>
           </div>
         </div>
@@ -88,7 +88,7 @@
               >
                 {{ getSeatName(row, col) }}
               </button>
-              <div v-if="theater.aisle_after && col === theater.aisle_after" class="aisle-gap"></div>
+              <div v-if="theater.aisles && theater.aisles.includes(col)" class="aisle-gap"></div>
             </template>
           </div>
         </div>

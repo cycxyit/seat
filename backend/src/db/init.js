@@ -44,6 +44,7 @@ async function createTheatersTable() {
       rows INTEGER NOT NULL,
       cols INTEGER NOT NULL,
       aisle_after INTEGER DEFAULT 5,
+      aisles TEXT DEFAULT '[5]',
       door_row INTEGER DEFAULT 0,
       class_time TEXT,
       subject TEXT,
@@ -88,6 +89,9 @@ async function migrateSchema() {
     `ALTER TABLE theaters ADD COLUMN class_time TEXT`,
     `ALTER TABLE theaters ADD COLUMN tab_name TEXT`,
     `ALTER TABLE bookings ADD COLUMN session_id TEXT`,
+    `ALTER TABLE bookings ADD COLUMN student_id TEXT`,
+    `ALTER TABLE bookings ADD COLUMN parent_phone TEXT`,
+    `ALTER TABLE theaters ADD COLUMN aisles TEXT DEFAULT '[5]'`, // JSON array of aisle positions
   ];
   
   for (const sql of migrations) {
@@ -103,7 +107,7 @@ async function migrateSchema() {
 
 async function seedDefaultConfig() {
   const defaults = [
-    ['max_subjects', '3'],
+    ['max_subjects', '10'],
     ['site_name', '科室座位预订系统'],
     ['logo_url', ''],
     ['footer_text', '© 2025 科室座位预订系统. All rights reserved.'],
@@ -111,7 +115,7 @@ async function seedDefaultConfig() {
   
   for (const [key, value] of defaults) {
     await client.execute({
-      sql: `INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)`,
+      sql: `INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)`,
       args: [key, value]
     });
   }
